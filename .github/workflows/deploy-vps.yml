@@ -1,6 +1,9 @@
 name: Deploy VPS
 
 on:
+  workflow_run:
+    workflows: [Publish Images]
+    types: [completed]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -9,15 +12,24 @@ on:
 
 permissions:
   contents: read
+  packages: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     environment: production-vps
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
     steps:
+      - uses: actions/checkout@v4
       - name: Validate image tag
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
         run: '[[ "$IMAGE_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]'
       - name: Configure SSH
         env:
@@ -28,12 +40,36 @@ jobs:
           install -m 600 /dev/null ~/.ssh/id_ed25519
           printf '%s' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Pull and restart without building
+      - name: Sync deployment files
         env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
         run: |
-          ssh "$VPS_USER@$VPS_HOST" \
-            "cd '$VPS_DEPLOY_PATH' && IMAGE_TAG='$IMAGE_TAG' docker compose pull writer && IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build writer caddy"
+          rsync -az --delete \
+            --exclude .git \
+            --exclude .env \
+            --exclude data \
+            ./ "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/"
+      - name: Pull and restart without building
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh "$VPS_USER@$VPS_HOST" \
+            "set -eu; trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT; \
+            docker login ghcr.io --username '$GHCR_USER' --password-stdin; \
+            cd '$VPS_DEPLOY_PATH'; \
+            sed -i.bak 's/^IMAGE_TAG=.*/IMAGE_TAG=$IMAGE_TAG/' .env; \
+            IMAGE_TAG='$IMAGE_TAG' docker compose --profile ops pull writer disk-alert; \
+            IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build clickhouse writer caddy"
+
+      - name: Verify writer health
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+        run: ssh "$VPS_USER@$VPS_HOST" "cd '$VPS_DEPLOY_PATH' && docker compose ps --status running --services | grep -qx writer"

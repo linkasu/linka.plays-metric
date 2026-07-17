@@ -1,19 +1,32 @@
 name: Deploy YC Collector
 
 on:
+  workflow_run:
+    workflows: [Publish Images]
+    types: [completed]
   workflow_dispatch:
     inputs:
-      image_url:
-        description: Published collector image URL with immutable tag
+      image_tag:
+        description: Published collector tag, for example sha-<commit>
         required: true
 
 permissions:
   contents: read
+  packages: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     environment: production-yc
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
     steps:
       - name: Install YC CLI
         run: curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -a
@@ -28,9 +41,21 @@ jobs:
           "$HOME/yandex-cloud/bin/yc" config set service-account-key /tmp/yc-key.json
           "$HOME/yandex-cloud/bin/yc" config set cloud-id "$YC_CLOUD_ID"
           "$HOME/yandex-cloud/bin/yc" config set folder-id "$YC_FOLDER_ID"
-      - name: Deploy published image
+      - name: Mirror tested GHCR image to Yandex Registry
         env:
-          IMAGE_URL: ${{ inputs.image_url }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YC_SA_KEY_JSON: ${{ secrets.YC_SA_KEY_JSON }}
+          YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          printf '%s' "$YC_SA_KEY_JSON" | docker login cr.yandex --username json_key --password-stdin
+          docker buildx imagetools create \
+            --tag "cr.yandex/$YC_REGISTRY_ID/linka-plays-metric-collector:$IMAGE_TAG" \
+            "ghcr.io/linkasu/linka.plays-metric-collector:$IMAGE_TAG"
+
+      - name: Deploy mirrored image
+        env:
+          YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
           YC_RUNTIME_SA_ID: ${{ secrets.YC_RUNTIME_SA_ID }}
           YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_LOCKBOX_SECRET_ID }}
           YC_LOCKBOX_SECRET_VERSION_ID: ${{ secrets.YC_LOCKBOX_SECRET_VERSION_ID }}
@@ -39,7 +64,7 @@ jobs:
           trap 'rm -f /tmp/yc-key.json' EXIT
           "$HOME/yandex-cloud/bin/yc" serverless container revision deploy \
             --container-name linka-plays-metric-collector \
-            --image "$IMAGE_URL" \
+            --image "cr.yandex/$YC_REGISTRY_ID/linka-plays-metric-collector:$IMAGE_TAG" \
             --cores 1 \
             --memory 256M \
             --execution-timeout 15s \

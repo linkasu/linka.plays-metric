@@ -6,4 +6,5 @@ coverage.out
 *.tfstate
 *.tfstate.*
 .terraform/
+terraform.tfvars
 crash.log

@@ -47,6 +47,18 @@ resource "yandex_resourcemanager_folder_iam_member" "ci_containers" {
   member    = "serviceAccount:${yandex_iam_service_account.ci.id}"
 }
 
+resource "yandex_resourcemanager_folder_iam_member" "ci_use_service_accounts" {
+  folder_id = var.folder_id
+  role      = "iam.serviceAccounts.user"
+  member    = "serviceAccount:${yandex_iam_service_account.ci.id}"
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "ci_terraform_state" {
+  folder_id = var.folder_id
+  role      = "storage.editor"
+  member    = "serviceAccount:${yandex_iam_service_account.ci.id}"
+}
+
 resource "yandex_lockbox_secret" "runtime" {
   name                = "linka-plays-metric-runtime"
   deletion_protection = true
@@ -92,6 +104,10 @@ resource "yandex_serverless_container" "collector" {
     yandex_resourcemanager_folder_iam_member.runtime_lockbox,
     yandex_resourcemanager_folder_iam_member.runtime_registry,
   ]
+
+  lifecycle {
+    ignore_changes = [image[0].url]
+  }
 }
 
 resource "yandex_cm_certificate" "collector" {
