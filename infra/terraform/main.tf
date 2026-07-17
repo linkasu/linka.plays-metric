@@ -59,6 +59,12 @@ resource "yandex_resourcemanager_folder_iam_member" "ci_terraform_state" {
   member    = "serviceAccount:${yandex_iam_service_account.ci.id}"
 }
 
+resource "yandex_resourcemanager_folder_iam_member" "ci_lockbox" {
+  folder_id = var.folder_id
+  role      = "lockbox.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.ci.id}"
+}
+
 resource "yandex_lockbox_secret" "runtime" {
   name                = "linka-plays-metric-runtime"
   deletion_protection = true
