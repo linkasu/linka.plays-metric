@@ -1,0 +1,30 @@
+{
+	email {$ACME_EMAIL}
+	admin 127.0.0.1:2019
+}
+
+{$WRITER_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	reverse_proxy writer:8081
+}
+
+{$DB_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	# https://github.com/yandex-cloud/docs/blob/master/ru/_includes/datalens/datalens-connection-note-ip.md
+	@datalens remote_ip 178.154.242.176/28 178.154.242.192/28 178.154.242.208/28 178.154.242.128/28 178.154.242.144/28 178.154.242.160/28 130.193.60.0/28
+	handle @datalens {
+		reverse_proxy clickhouse:8123
+	}
+	handle {
+		respond "Forbidden" 403
+	}
+}

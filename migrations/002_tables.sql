@@ -1,0 +1,82 @@
+CREATE TABLE IF NOT EXISTS linka_metric.events
+(
+    event_id UUID,
+    event_name LowCardinality(String),
+    occurred_at DateTime64(3, 'UTC'),
+    installation_id UUID,
+    app_session_id UUID,
+    game_session_id Nullable(UUID),
+    app_version String,
+    app_build String,
+    platform LowCardinality(String),
+    os_version String,
+    locale LowCardinality(String),
+    page Nullable(String),
+    mode Nullable(String),
+    game_category Nullable(String),
+    setting_key Nullable(String),
+    setting_enabled Nullable(Bool),
+    setting_number Nullable(Float64),
+    game_id Nullable(String),
+    level_index Nullable(UInt32),
+    target_kind Nullable(String),
+    input_method Nullable(String),
+    elapsed_ms Nullable(UInt32),
+    response_ms Nullable(UInt32),
+    result Nullable(String),
+    reason Nullable(String),
+    hint_kind Nullable(String),
+    difficulty Nullable(UInt8),
+    tobii_state Nullable(String),
+    updater_state Nullable(String),
+    updater_version Nullable(String),
+    error_fingerprint Nullable(String),
+    error_component Nullable(String),
+    dropped_count Nullable(UInt64),
+    ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(occurred_at)
+ORDER BY (installation_id, event_id);
+
+CREATE TABLE IF NOT EXISTS linka_metric.session_summaries
+(
+    session_id UUID,
+    session_type LowCardinality(String),
+    installation_id UUID,
+    app_session_id UUID,
+    game_session_id Nullable(UUID),
+    game_id Nullable(String),
+    started_at DateTime64(3, 'UTC'),
+    ended_at DateTime64(3, 'UTC'),
+    duration_ms UInt64,
+    paused_ms UInt64,
+    menu_mode Nullable(String),
+    game_category Nullable(String),
+    input_method Nullable(String),
+    finish_reason Nullable(String),
+    steps_completed UInt32,
+    max_steps UInt32,
+    success_count UInt32,
+    mistake_count UInt32,
+    hint_count UInt32,
+    target_cancel_count UInt32,
+    gaze_lost_count UInt32,
+    difficulty_changes UInt32,
+    gaze_sample_count UInt64,
+    mouse_sample_count UInt64,
+    valid_gaze_ratio Nullable(Float64),
+    mean_dwell_ms Nullable(Float64),
+    configured_dwell_ms UInt32,
+    result Nullable(String),
+    interruption_reason Nullable(String),
+    app_version String,
+    app_build String,
+    platform LowCardinality(String),
+    os_version String,
+    locale LowCardinality(String),
+    ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(started_at)
+ORDER BY (installation_id, session_id);

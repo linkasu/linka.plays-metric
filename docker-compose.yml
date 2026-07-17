@@ -1,0 +1,130 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-25.3.6.56-alpine}
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: linka_metric
+      CLICKHOUSE_USER: ${CLICKHOUSE_ADMIN_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD}
+      CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER}
+      CLICKHOUSE_ADMIN_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD}
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      CLICKHOUSE_DATALENS_PASSWORD: ${CLICKHOUSE_DATALENS_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    expose:
+      - "8123"
+      - "9000"
+    volumes:
+      - ${DATA_ROOT:-./data}/clickhouse:/var/lib/clickhouse
+      - ${DATA_ROOT:-./data}/clickhouse-logs:/var/log/clickhouse-server
+      - ./migrations/001_database.sql:/docker-entrypoint-initdb.d/001_database.sql:ro
+      - ./migrations/002_tables.sql:/docker-entrypoint-initdb.d/002_tables.sql:ro
+      - ./migrations/003_views.sql:/docker-entrypoint-initdb.d/003_views.sql:ro
+      - ./deploy/clickhouse/init/010-users.sh:/docker-entrypoint-initdb.d/010-users.sh:ro
+      - ./deploy/clickhouse/config.d/resources.xml:/etc/clickhouse-server/config.d/resources.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 1536m
+    cpus: 1.5
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  writer:
+    image: ghcr.io/linkasu/linka.plays-metric-writer:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      LISTEN_ADDR: :8081
+      WRITER_HMAC_SECRET: ${WRITER_HMAC_SECRET}
+      CLICKHOUSE_ADDRS: clickhouse:9000
+      CLICKHOUSE_DATABASE: linka_metric
+      CLICKHOUSE_USER: metric_writer
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+    expose:
+      - "8081"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    mem_limit: 256m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  caddy:
+    image: caddy:${CADDY_VERSION:-2.10.0-alpine}
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      WRITER_DOMAIN: ${WRITER_DOMAIN:-plays-metric-writer.nkolinka.ru}
+      DB_DOMAIN: ${DB_DOMAIN:-plays-metric-db.nkolinka.ru}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DATA_ROOT:-./data}/caddy-data:/data
+      - ${DATA_ROOT:-./data}/caddy-config:/config
+    depends_on:
+      writer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+    cpus: 0.25
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+      - edge
+
+  disk-alert:
+    profiles: ["ops"]
+    image: ghcr.io/linkasu/linka.plays-metric-disk-alert:${IMAGE_TAG:-latest}
+    environment:
+      DISK_PATH: /host
+      DISK_THRESHOLD_PERCENT: "80"
+      DISK_ALERT_STATE_FILE: /state/disk-alert.state
+      SMTP_ADDR: ${SMTP_ADDR}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_TO: ${SMTP_TO:-ivan@aacidov.ru}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - /:/host:ro
+      - ${DATA_ROOT:-./data}/disk-alert:/state
+    read_only: true
+    mem_limit: 64m
+    cpus: 0.1
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - edge
+
+networks:
+  backend:
+    internal: true
+  edge:

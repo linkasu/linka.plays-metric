@@ -1,0 +1,39 @@
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Published writer tag, for example sha-<commit>
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production-vps
+    steps:
+      - name: Validate image tag
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: '[[ "$IMAGE_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]'
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/null ~/.ssh/id_ed25519
+          printf '%s' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Pull and restart without building
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" \
+            "cd '$VPS_DEPLOY_PATH' && IMAGE_TAG='$IMAGE_TAG' docker compose pull writer && IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build writer caddy"

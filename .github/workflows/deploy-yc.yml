@@ -1,0 +1,50 @@
+name: Deploy YC Collector
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_url:
+        description: Published collector image URL with immutable tag
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production-yc
+    steps:
+      - name: Install YC CLI
+        run: curl -fsSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -a
+      - name: Configure service account
+        env:
+          YC_SA_KEY_JSON: ${{ secrets.YC_SA_KEY_JSON }}
+          YC_CLOUD_ID: ${{ secrets.YC_CLOUD_ID }}
+          YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
+        run: |
+          install -m 600 /dev/null /tmp/yc-key.json
+          printf '%s' "$YC_SA_KEY_JSON" > /tmp/yc-key.json
+          "$HOME/yandex-cloud/bin/yc" config set service-account-key /tmp/yc-key.json
+          "$HOME/yandex-cloud/bin/yc" config set cloud-id "$YC_CLOUD_ID"
+          "$HOME/yandex-cloud/bin/yc" config set folder-id "$YC_FOLDER_ID"
+      - name: Deploy published image
+        env:
+          IMAGE_URL: ${{ inputs.image_url }}
+          YC_RUNTIME_SA_ID: ${{ secrets.YC_RUNTIME_SA_ID }}
+          YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_LOCKBOX_SECRET_ID }}
+          YC_LOCKBOX_SECRET_VERSION_ID: ${{ secrets.YC_LOCKBOX_SECRET_VERSION_ID }}
+          WRITER_URL: ${{ secrets.WRITER_URL }}
+        run: |
+          trap 'rm -f /tmp/yc-key.json' EXIT
+          "$HOME/yandex-cloud/bin/yc" serverless container revision deploy \
+            --container-name linka-plays-metric-collector \
+            --image "$IMAGE_URL" \
+            --cores 1 \
+            --memory 256M \
+            --execution-timeout 15s \
+            --concurrency 16 \
+            --service-account-id "$YC_RUNTIME_SA_ID" \
+            --environment "LISTEN_ADDR=:8080,WRITER_URL=$WRITER_URL" \
+            --secret "environment-variable=INSTALLATION_HMAC_SECRET,id=$YC_LOCKBOX_SECRET_ID,version-id=$YC_LOCKBOX_SECRET_VERSION_ID,key=installation_hmac_secret" \
+            --secret "environment-variable=WRITER_HMAC_SECRET,id=$YC_LOCKBOX_SECRET_ID,version-id=$YC_LOCKBOX_SECRET_VERSION_ID,key=writer_hmac_secret"

@@ -1,0 +1,80 @@
+CREATE VIEW IF NOT EXISTS linka_metric.datalens_events
+SQL SECURITY DEFINER
+AS
+SELECT
+    event_id,
+    event_name,
+    occurred_at,
+    cityHash64(installation_id) AS installation_key,
+    cityHash64(app_session_id) AS app_session_key,
+    if(game_session_id IS NULL, NULL, cityHash64(assumeNotNull(game_session_id))) AS game_session_key,
+    app_version,
+    app_build,
+    platform,
+    os_version,
+    locale,
+    page,
+    mode,
+    game_category,
+    setting_key,
+    setting_enabled,
+    setting_number,
+    game_id,
+    level_index,
+    target_kind,
+    input_method,
+    elapsed_ms,
+    response_ms,
+    result,
+    reason,
+    hint_kind,
+    difficulty,
+    tobii_state,
+    updater_state,
+    updater_version,
+    error_fingerprint,
+    error_component,
+    dropped_count
+FROM linka_metric.events FINAL
+SETTINGS join_use_nulls = 1;
+
+CREATE VIEW IF NOT EXISTS linka_metric.datalens_session_summaries
+SQL SECURITY DEFINER
+AS
+SELECT
+    session_id,
+    session_type,
+    cityHash64(installation_id) AS installation_key,
+    cityHash64(app_session_id) AS app_session_key,
+    if(game_session_id IS NULL, NULL, cityHash64(assumeNotNull(game_session_id))) AS game_session_key,
+    game_id,
+    started_at,
+    ended_at,
+    duration_ms,
+    paused_ms,
+    menu_mode,
+    game_category,
+    input_method,
+    finish_reason,
+    steps_completed,
+    max_steps,
+    success_count,
+    mistake_count,
+    hint_count,
+    target_cancel_count,
+    gaze_lost_count,
+    difficulty_changes,
+    gaze_sample_count,
+    mouse_sample_count,
+    valid_gaze_ratio,
+    mean_dwell_ms,
+    configured_dwell_ms,
+    result,
+    interruption_reason,
+    app_version,
+    app_build,
+    platform,
+    os_version,
+    locale
+FROM linka_metric.session_summaries FINAL
+SETTINGS join_use_nulls = 1;

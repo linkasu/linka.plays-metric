@@ -1,0 +1,9 @@
+[Unit]
+Description=Check LINKa Plays Metric disk usage
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/linka-plays-metric
+ExecStart=/usr/bin/docker compose --profile ops run --rm disk-alert
