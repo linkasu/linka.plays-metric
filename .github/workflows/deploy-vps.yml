@@ -67,6 +67,16 @@ jobs:
             IMAGE_TAG='$IMAGE_TAG' docker compose --profile ops pull writer disk-alert; \
             IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build clickhouse writer caddy"
 
+      - name: Configure DataLens read-only user
+        env:
+          CLICKHOUSE_DATALENS_PASSWORD: ${{ secrets.CLICKHOUSE_DATALENS_PASSWORD }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+        run: |
+          printf '%s\n' "$CLICKHOUSE_DATALENS_PASSWORD" | ssh "$VPS_USER@$VPS_HOST" \
+            "cd '$VPS_DEPLOY_PATH' && sh deploy/clickhouse/configure-datalens.sh"
+
       - name: Verify writer health
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}

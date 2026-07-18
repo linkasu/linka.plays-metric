@@ -20,7 +20,7 @@ clickhouse-client \
     CREATE USER OR REPLACE datalens
       IDENTIFIED WITH sha256_hash BY '${datalens_hash}'
       HOST ANY
-      SETTINGS readonly = 1;
+      SETTINGS readonly = 2;
     GRANT INSERT ON linka_metric.events TO metric_writer;
     GRANT INSERT ON linka_metric.session_summaries TO metric_writer;
     GRANT SELECT ON linka_metric.datalens_events TO datalens;
