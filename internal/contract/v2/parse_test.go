@@ -83,6 +83,24 @@ func TestParsePrivacyRequestAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestParsePrivacyRequestNormalizesPersistedNanoseconds(t *testing.T) {
+	body := fmt.Sprintf(`{"schema_version":2,"request_id":"10000000-0000-4000-8000-000000000001","scope":{"product":"linka-plays","subject_key":%q},"action":"delete","requested_at":"2026-07-18T12:00:00.123456789Z"}`, testOpaqueKey)
+	request, err := ParsePrivacyRequest([]byte(body), testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := request.RequestedAtTime.Nanosecond(), 123*int(time.Millisecond); got != want {
+		t.Fatalf("requested_at nanoseconds = %d, want %d", got, want)
+	}
+}
+
+func TestParseBatchRejectsSubMillisecondPrecision(t *testing.T) {
+	body := strings.Replace(validCommonBatch(), "2026-07-18T12:00:00.000Z", "2026-07-18T12:00:00.000001Z", 1)
+	if _, err := ParseBatch([]byte(body), testNow); err == nil {
+		t.Fatal("sub-millisecond batch timestamp was accepted")
+	}
+}
+
 func validCommonBatch() string {
 	return fmt.Sprintf(`{
   "schema_version":2,

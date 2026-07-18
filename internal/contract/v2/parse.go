@@ -139,7 +139,7 @@ func ParsePrivacyRequest(data []byte, now time.Time) (ValidatedPrivacyRequest, e
 	if request.Action != PrivacyOptOut && request.Action != PrivacyDelete {
 		return ValidatedPrivacyRequest{}, errors.New("unknown privacy action")
 	}
-	requestedAt, err := parseTimestamp(request.RequestedAt)
+	requestedAt, err := parsePrivacyTimestamp(request.RequestedAt)
 	if err != nil {
 		return ValidatedPrivacyRequest{}, fmt.Errorf("requested_at: %w", err)
 	}
@@ -340,7 +340,18 @@ func parseTimestamp(value string) (time.Time, error) {
 	if parsed.Nanosecond()%int(time.Millisecond) != 0 {
 		return time.Time{}, errors.New("precision must not exceed milliseconds")
 	}
-	parsed = parsed.UTC()
+	return validateTimestampRange(parsed.UTC())
+}
+
+func parsePrivacyTimestamp(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, errors.New("must be RFC3339")
+	}
+	return validateTimestampRange(parsed.UTC().Truncate(time.Millisecond))
+}
+
+func validateTimestampRange(parsed time.Time) (time.Time, error) {
 	if parsed.Before(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)) || !parsed.Before(time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)) {
 		return time.Time{}, errors.New("timestamp is outside the storage range")
 	}
