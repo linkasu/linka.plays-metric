@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"sync"
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/google/uuid"
 	v1 "github.com/linkasu/linka.plays-metric/internal/contract/v1"
+	v2 "github.com/linkasu/linka.plays-metric/internal/contract/v2"
 )
 
 type Config struct {
@@ -17,10 +19,24 @@ type Config struct {
 	Username  string
 	Password  string
 	Secure    bool
+	Retention Retention
+}
+
+type Retention struct {
+	IngestBatches time.Duration
+	Common        time.Duration
+	Technical     time.Duration
+	Plays         time.Duration
+	Privacy       time.Duration
 }
 
 type Store struct {
 	connection ch.Conn
+	retention  Retention
+	now        func() time.Time
+	v2Mu       sync.Mutex
+	privacyMu  sync.Mutex
+	v1Mu       sync.Mutex
 }
 
 func Open(config Config) (*Store, error) {
@@ -45,7 +61,7 @@ func Open(config Config) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open ClickHouse: %w", err)
 	}
-	return &Store{connection: connection}, nil
+	return &Store{connection: connection, retention: config.Retention, now: time.Now}, nil
 }
 
 func (s *Store) Ping(ctx context.Context) error {
@@ -57,6 +73,15 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Insert(ctx context.Context, batch v1.ValidatedBatch) error {
+	s.v1Mu.Lock()
+	defer s.v1Mu.Unlock()
+	suppressed, err := s.v1BatchSuppressed(ctx, batch)
+	if err != nil {
+		return err
+	}
+	if suppressed {
+		return v2.ErrSuppressed
+	}
 	ingestedAt := time.Now().UTC()
 	if len(batch.Events) > 0 {
 		if err := s.insertEvents(ctx, batch.Events, ingestedAt); err != nil {
@@ -69,6 +94,31 @@ func (s *Store) Insert(ctx context.Context, batch v1.ValidatedBatch) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) v1BatchSuppressed(ctx context.Context, batch v1.ValidatedBatch) (bool, error) {
+	installations := make(map[uuid.UUID]struct{})
+	for _, event := range batch.Events {
+		installations[uuid.MustParse(event.InstallationID)] = struct{}{}
+	}
+	for _, summary := range batch.SessionSummaries {
+		installations[uuid.MustParse(summary.InstallationID)] = struct{}{}
+	}
+	if len(installations) == 0 {
+		return false, nil
+	}
+	ids := make([]uuid.UUID, 0, len(installations))
+	for installationID := range installations {
+		ids = append(ids, installationID)
+	}
+	var count uint64
+	if err := s.connection.QueryRow(ctx, `
+		SELECT count()
+		FROM privacy_suppressions_v2 FINAL
+		WHERE active = true AND legacy_installation_id IN (?)`, ids).Scan(&count); err != nil {
+		return false, fmt.Errorf("query V1 privacy suppression: %w", err)
+	}
+	return count > 0, nil
 }
 
 func (s *Store) insertEvents(ctx context.Context, events []v1.ValidatedEvent, ingestedAt time.Time) error {

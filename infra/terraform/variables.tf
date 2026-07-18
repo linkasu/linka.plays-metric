@@ -35,6 +35,50 @@ variable "writer_url" {
   default     = "https://plays-metric-writer.nkolinka.ru"
 }
 
+variable "service_hmac_active_key_id" {
+  description = "Non-secret active collector-to-writer V2 HMAC key ID"
+  type        = string
+  default     = "collector-2026-07"
+}
+
+variable "installation_hmac_active_key_id" {
+  description = "Active installation-token HMAC key ID"
+  type        = string
+  default     = "installation-2026-08"
+}
+
+variable "installation_hmac_previous_key_id" {
+  description = "Previous installation-token HMAC key ID retained for verification"
+  type        = string
+  default     = "installation-2026-07"
+}
+
+variable "identity_jwks_url" {
+  description = "HTTPS URL of the LINKa Identity JWKS endpoint"
+  type        = string
+
+  validation {
+    condition     = startswith(var.identity_jwks_url, "https://")
+    error_message = "identity_jwks_url must use HTTPS."
+  }
+}
+
+variable "identity_token_issuer" {
+  description = "Exact issuer expected in LINKa Identity JWTs"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.identity_token_issuer)) > 0
+    error_message = "identity_token_issuer must not be empty."
+  }
+}
+
+variable "identity_telemetry_audience" {
+  description = "Exact telemetry audience expected in LINKa Identity JWTs"
+  type        = string
+  default     = "linka-plays-metric"
+}
+
 variable "lockbox_secret_version_id" {
   description = "ID of a manually created Lockbox version; payload is never managed by Terraform"
   type        = string

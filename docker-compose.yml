@@ -9,6 +9,7 @@ services:
       CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER}
       CLICKHOUSE_ADMIN_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD}
       CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      CLICKHOUSE_PRIVACY_PASSWORD: ${CLICKHOUSE_PRIVACY_PASSWORD}
       CLICKHOUSE_DATALENS_PASSWORD: ${CLICKHOUSE_DATALENS_PASSWORD}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     expose:
@@ -20,6 +21,13 @@ services:
       - ./migrations/001_database.sql:/docker-entrypoint-initdb.d/001_database.sql:ro
       - ./migrations/002_tables.sql:/docker-entrypoint-initdb.d/002_tables.sql:ro
       - ./migrations/003_views.sql:/docker-entrypoint-initdb.d/003_views.sql:ro
+      - ./migrations/004_schema_migrations.sql:/docker-entrypoint-initdb.d/004_schema_migrations.sql:ro
+      - ./migrations/005_v2_tables.sql:/docker-entrypoint-initdb.d/005_v2_tables.sql:ro
+      - ./migrations/006_v2_datalens_views.sql:/docker-entrypoint-initdb.d/006_v2_datalens_views.sql:ro
+      - ./migrations/007_v2_operational_guards.sql:/docker-entrypoint-initdb.d/007_v2_operational_guards.sql:ro
+      - ./migrations/008_v1_privacy.sql:/docker-entrypoint-initdb.d/008_v1_privacy.sql:ro
+      - ./migrations/009_v2_batch_reservations.sql:/docker-entrypoint-initdb.d/009_v2_batch_reservations.sql:ro
+      - ./migrations/010_v2_registry_privacy_scope.sql:/docker-entrypoint-initdb.d/010_v2_registry_privacy_scope.sql:ro
       - ./deploy/clickhouse/init/010-users.sh:/docker-entrypoint-initdb.d/010-users.sh:ro
       - ./deploy/clickhouse/config.d/resources.xml:/etc/clickhouse-server/config.d/resources.xml:ro
     healthcheck:
@@ -45,10 +53,19 @@ services:
     environment:
       LISTEN_ADDR: :8081
       WRITER_HMAC_SECRET: ${WRITER_HMAC_SECRET}
+      SERVICE_HMAC_ACTIVE_KEY_ID: ${SERVICE_HMAC_ACTIVE_KEY_ID:-default}
+      SERVICE_HMAC_ACTIVE_SECRET: ${SERVICE_HMAC_ACTIVE_SECRET:-}
+      SERVICE_HMAC_PREVIOUS_KEY_ID: ${SERVICE_HMAC_PREVIOUS_KEY_ID:-}
+      SERVICE_HMAC_PREVIOUS_SECRET: ${SERVICE_HMAC_PREVIOUS_SECRET:-}
       CLICKHOUSE_ADDRS: clickhouse:9000
       CLICKHOUSE_DATABASE: linka_metric
       CLICKHOUSE_USER: metric_writer
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      RETENTION_V2_INGEST_BATCHES: ${RETENTION_V2_INGEST_BATCHES:-}
+      RETENTION_V2_COMMON: ${RETENTION_V2_COMMON:-}
+      RETENTION_V2_TECHNICAL: ${RETENTION_V2_TECHNICAL:-}
+      RETENTION_V2_PLAYS: ${RETENTION_V2_PLAYS:-}
+      RETENTION_V2_PRIVACY: ${RETENTION_V2_PRIVACY:-}
     expose:
       - "8081"
     depends_on:
@@ -65,6 +82,48 @@ services:
       - /tmp:size=16m,noexec,nosuid,nodev
     mem_limit: 256m
     cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  migrate:
+    profiles: ["migration"]
+    image: ghcr.io/linkasu/linka.plays-metric-migrate:${IMAGE_TAG:-latest}
+    environment:
+      CLICKHOUSE_ADDRS: clickhouse:9000
+      CLICKHOUSE_DATABASE: linka_metric
+      CLICKHOUSE_ADMIN_USER: ${CLICKHOUSE_ADMIN_USER}
+      CLICKHOUSE_ADMIN_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  privacy-worker:
+    profiles: ["privacy"]
+    image: ghcr.io/linkasu/linka.plays-metric-privacy-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_ADDRS: clickhouse:9000
+      CLICKHOUSE_DATABASE: linka_metric
+      CLICKHOUSE_USER: metric_privacy
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PRIVACY_PASSWORD}
+      PRIVACY_WORKER_INTERVAL: ${PRIVACY_WORKER_INTERVAL:-30s}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    mem_limit: 128m
+    cpus: 0.25
     security_opt:
       - no-new-privileges:true
     networks:

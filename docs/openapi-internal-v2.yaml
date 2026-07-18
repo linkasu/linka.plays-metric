@@ -1,0 +1,130 @@
+openapi: 3.1.0
+info:
+  title: LINKa Plays Metric Internal Writer API V2
+  version: 2.0.0
+  description: Service-only writer API. All signature headers are bound by LINKA-HMAC-V2.
+paths:
+  /internal/v1/privacy/requests:
+    post:
+      operationId: internalCreateInstallationDeletionV1
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/SignatureVersion'
+        - $ref: '#/components/parameters/KeyID'
+        - $ref: '#/components/parameters/Caller'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/BodySHA'
+        - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schema_version, request_id, installation_id, action, requested_at]
+              properties:
+                schema_version: { const: 1 }
+                request_id: { type: string, format: uuid }
+                installation_id: { type: string, format: uuid }
+                action: { const: delete }
+                requested_at: { type: string, format: date-time }
+      responses:
+        '202': { description: V1 suppression persisted and deletion queued or polled. }
+        '400': { description: Invalid request or idempotency binding. }
+        '401': { description: Invalid service signature. }
+        '409': { description: Same request ID with a different body hash. }
+        '503': { description: Durable store unavailable. }
+  /internal/v2/batches:
+    post:
+      operationId: internalIngestBatchV2
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/SignatureVersion'
+        - $ref: '#/components/parameters/KeyID'
+        - $ref: '#/components/parameters/Caller'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/BodySHA'
+        - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './openapi-v2.yaml#/components/schemas/Batch'
+      responses:
+        '202': { description: Persisted or same-body replay accepted. }
+        '400': { description: Invalid typed batch or idempotency binding. }
+        '401': { description: Invalid service signature. }
+        '403': { description: Scope is suppressed. }
+        '409': { description: Same request ID with a different body hash. }
+        '503': { description: Durable store unavailable. }
+  /internal/v2/privacy/requests:
+    post:
+      operationId: internalCreatePrivacyRequestV2
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/SignatureVersion'
+        - $ref: '#/components/parameters/KeyID'
+        - $ref: '#/components/parameters/Caller'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/BodySHA'
+        - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './openapi-v2.yaml#/components/schemas/PrivacyRequest'
+      responses:
+        '202': { description: Active suppression persisted with pending status. }
+        '400': { description: Invalid request or idempotency binding. }
+        '401': { description: Invalid service signature. }
+        '409': { description: Same request ID with a different body hash. }
+        '503': { description: Durable store unavailable. }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    SignatureVersion:
+      name: X-Linka-Signature-Version
+      in: header
+      required: true
+      schema: { const: v2 }
+    KeyID:
+      name: X-Linka-Key-ID
+      in: header
+      required: true
+      schema: { type: string, pattern: '^[a-z][a-z0-9-]{0,31}$' }
+    Caller:
+      name: X-Linka-Caller
+      in: header
+      required: true
+      schema: { const: collector }
+    RequestID:
+      name: X-Linka-Request-ID
+      in: header
+      required: true
+      description: Must equal Idempotency-Key and the body batch_id/request_id.
+      schema: { type: string, format: uuid }
+    Timestamp:
+      name: X-Linka-Timestamp
+      in: header
+      required: true
+      schema: { type: string, pattern: '^[0-9]+$' }
+    BodySHA:
+      name: X-Linka-Body-SHA256
+      in: header
+      required: true
+      schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+    Signature:
+      name: X-Linka-Signature
+      in: header
+      required: true
+      schema: { type: string }

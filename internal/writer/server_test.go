@@ -14,11 +14,33 @@ import (
 
 	"github.com/linkasu/linka.plays-metric/internal/auth"
 	v1 "github.com/linkasu/linka.plays-metric/internal/contract/v1"
+	v2 "github.com/linkasu/linka.plays-metric/internal/contract/v2"
 )
 
 type fakeStore struct {
 	inserted int
 	err      error
+}
+
+type fakeStoreV2 struct {
+	result v2.IngestResult
+	err    error
+	calls  int
+}
+
+func (s *fakeStoreV2) InsertV2(context.Context, v2.ValidatedBatch, string) (v2.IngestResult, error) {
+	s.calls++
+	return s.result, s.err
+}
+
+func (s *fakeStoreV2) CreatePrivacyRequest(context.Context, v2.ValidatedPrivacyRequest, string) (v2.PrivacyResult, error) {
+	s.calls++
+	return v2.PrivacyResult{Status: "pending"}, s.err
+}
+
+func (s *fakeStoreV2) CreateLegacyPrivacyRequest(context.Context, v1.ValidatedPrivacyRequest, string) (v2.PrivacyResult, error) {
+	s.calls++
+	return v2.PrivacyResult{Status: "pending"}, s.err
 }
 
 func (s *fakeStore) Ping(context.Context) error {
@@ -65,6 +87,51 @@ func TestWriterRejectsInvalidSignatureWithoutInsert(t *testing.T) {
 	}
 }
 
+func TestWriterV2VerifiesBoundRequestAndReturnsReplay(t *testing.T) {
+	storeV2 := &fakeStoreV2{result: v2.IngestResult{Count: 1, Replayed: true}}
+	key := auth.ServiceKey{ID: "current", Secret: []byte(strings.Repeat("k", 32))}
+	signer, _ := auth.NewServiceSigner(key, "collector")
+	verifier, _ := auth.NewServiceVerifier(key, nil, "collector", 5*time.Minute)
+	body := writerV2Batch(time.Now().UTC())
+	requestID := "10000000-0000-4000-8000-000000000001"
+	headers, err := signer.Sign(http.MethodPost, "/internal/v2/batches", requestID, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/internal/v2/batches", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", requestID)
+	auth.ApplyServiceHeaders(request.Header, headers)
+	response := httptest.NewRecorder()
+
+	NewServerWithV2(&fakeStore{}, storeV2, []byte(strings.Repeat("w", 32)), verifier, writerTestLogger(), 5*time.Minute).ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted || storeV2.calls != 1 || !strings.Contains(response.Body.String(), `"replayed":true`) {
+		t.Fatalf("status = %d, calls = %d, body = %s", response.Code, storeV2.calls, response.Body.String())
+	}
+}
+
+func TestWriterV2ReturnsConflictForChangedBodyHash(t *testing.T) {
+	storeV2 := &fakeStoreV2{err: v2.ErrIdempotencyConflict}
+	key := auth.ServiceKey{ID: "current", Secret: []byte(strings.Repeat("k", 32))}
+	signer, _ := auth.NewServiceSigner(key, "collector")
+	verifier, _ := auth.NewServiceVerifier(key, nil, "collector", 5*time.Minute)
+	body := writerV2Batch(time.Now().UTC())
+	requestID := "10000000-0000-4000-8000-000000000001"
+	headers, _ := signer.Sign(http.MethodPost, "/internal/v2/batches", requestID, body)
+	request := httptest.NewRequest(http.MethodPost, "/internal/v2/batches", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", requestID)
+	auth.ApplyServiceHeaders(request.Header, headers)
+	response := httptest.NewRecorder()
+
+	NewServerWithV2(&fakeStore{}, storeV2, []byte(strings.Repeat("w", 32)), verifier, writerTestLogger(), 5*time.Minute).ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || storeV2.calls != 1 {
+		t.Fatalf("status = %d, calls = %d", response.Code, storeV2.calls)
+	}
+}
+
 func writerValidBatch() []byte {
 	return []byte(fmt.Sprintf(`{
   "schema_version":1,
@@ -78,6 +145,23 @@ func writerValidBatch() []byte {
     "properties":{}
   }]
 }`))
+}
+
+func writerV2Batch(now time.Time) []byte {
+	return []byte(fmt.Sprintf(`{
+  "schema_version":2,
+  "batch_id":"10000000-0000-4000-8000-000000000001",
+  "scope":{"product":"linka-plays","subject_key":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+  "stream":"common",
+  "sent_at":%q,
+  "records":[{
+    "record_id":"20000000-0000-4000-8000-000000000002",
+    "occurred_at":%q,
+    "kind":"app_started",
+    "app_session_id":"30000000-0000-4000-8000-000000000003",
+    "app":{"version":"1","build":"1","platform":"linux","os_version":"1","locale":"ru"}
+  }]
+}`, now.UTC().Truncate(time.Second).Format(time.RFC3339), now.UTC().Add(-time.Minute).Truncate(time.Second).Format(time.RFC3339)))
 }
 
 func writerTestLogger() *slog.Logger {

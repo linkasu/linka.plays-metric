@@ -1,0 +1,358 @@
+openapi: 3.1.0
+info:
+  title: LINKa Plays Metric Public API
+  version: 2.0.0
+  description: Closed, product-scoped telemetry and privacy API. Unknown fields and duplicate JSON keys are rejected.
+servers:
+  - url: https://plays-metric.nkolinka.ru
+paths:
+  /v1/installations/renew:
+    post:
+      operationId: renewInstallationToken
+      security:
+        - installationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Fresh bounded-lifetime token for the same installation.
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/privacy/requests:
+    post:
+      operationId: createInstallationDeletionV1
+      security:
+        - installationToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/V1PrivacyRequest'
+      responses:
+        '202':
+          description: Suppression persisted and durable V1 deletion queued or polled.
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /v2/tokens:
+    post:
+      operationId: issueProductToken
+      deprecated: true
+      description: Staging-only legacy token minting. Production accepts Identity-issued Ed25519 JWTs and does not expose this route.
+      security:
+        - installationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [product]
+              properties:
+                product:
+                  $ref: '#/components/schemas/Product'
+      responses:
+        '201':
+          description: Product-scoped opaque token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v2/batches:
+    post:
+      operationId: ingestBatchV2
+      security:
+        - productToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Batch'
+      responses:
+        '202':
+          description: Persisted or same-body replay accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [batch_id, accepted_records, replayed]
+                properties:
+                  batch_id: { type: string, format: uuid }
+                  accepted_records: { type: integer, minimum: 1, maximum: 500 }
+                  replayed: { type: boolean }
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+  /v2/privacy/requests:
+    post:
+      operationId: createPrivacyRequestV2
+      security:
+        - productToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrivacyRequest'
+      responses:
+        '202':
+          description: Suppression persisted and request queued. This is not deletion completion.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [request_id, status, replayed]
+                properties:
+                  request_id: { type: string, format: uuid }
+                  status: { type: string, enum: [pending, processing, retry, completed, failed] }
+                  replayed: { type: boolean }
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    installationToken:
+      type: http
+      scheme: bearer
+      bearerFormat: LINKA installation v1
+    productToken:
+      type: http
+      scheme: bearer
+      bearerFormat: Identity Ed25519 JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID equal to batch_id or request_id.
+      schema: { type: string, format: uuid }
+  responses:
+    Error:
+      description: Closed error code; no request body or identity is logged.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    V1PrivacyRequest:
+      type: object
+      additionalProperties: false
+      required: [schema_version, request_id, action, requested_at]
+      properties:
+        schema_version: { const: 1 }
+        request_id: { type: string, format: uuid }
+        action: { const: delete }
+        requested_at: { type: string, format: date-time }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { type: string }
+    Product:
+      type: string
+      enum: [linka-plays]
+    OpaqueKey:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+    Scope:
+      type: object
+      additionalProperties: false
+      required: [product, subject_key]
+      properties:
+        product:
+          $ref: '#/components/schemas/Product'
+        subject_key:
+          $ref: '#/components/schemas/OpaqueKey'
+        person_key:
+          oneOf:
+            - $ref: '#/components/schemas/OpaqueKey'
+            - type: 'null'
+        org_key:
+          oneOf:
+            - $ref: '#/components/schemas/OpaqueKey'
+            - type: 'null'
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [token, token_version, product, subject_key, issued_at, expires_at]
+      properties:
+        token: { type: string }
+        token_version: { const: v2 }
+        product:
+          $ref: '#/components/schemas/Product'
+        subject_key:
+          $ref: '#/components/schemas/OpaqueKey'
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    App:
+      type: object
+      additionalProperties: false
+      required: [version, build, platform, os_version, locale]
+      properties:
+        version: { type: string, minLength: 1, maxLength: 96, pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]*$' }
+        build: { type: string, minLength: 1, maxLength: 96, pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]*$' }
+        platform: { type: string, enum: [windows, macos, linux] }
+        os_version: { type: string, minLength: 1, maxLength: 96, pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]*$' }
+        locale: { type: string, enum: [ru, ru-RU, en, en-US] }
+    BatchBase:
+      type: object
+      required: [schema_version, batch_id, scope, stream, sent_at, records]
+      properties:
+        schema_version: { const: 2 }
+        batch_id: { type: string, format: uuid }
+        scope:
+          $ref: '#/components/schemas/Scope'
+        stream: { type: string, enum: [common, technical, plays] }
+        sent_at: { type: string, format: date-time }
+    Batch:
+      oneOf:
+        - $ref: '#/components/schemas/CommonBatch'
+        - $ref: '#/components/schemas/TechnicalBatch'
+        - $ref: '#/components/schemas/PlaysBatch'
+      discriminator:
+        propertyName: stream
+        mapping:
+          common: '#/components/schemas/CommonBatch'
+          technical: '#/components/schemas/TechnicalBatch'
+          plays: '#/components/schemas/PlaysBatch'
+    CommonBatch:
+      allOf:
+        - $ref: '#/components/schemas/BatchBase'
+        - type: object
+          properties:
+            stream: { const: common }
+            records:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/CommonRecord'
+      unevaluatedProperties: false
+    TechnicalBatch:
+      allOf:
+        - $ref: '#/components/schemas/BatchBase'
+        - type: object
+          properties:
+            stream: { const: technical }
+            records:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/TechnicalRecord'
+      unevaluatedProperties: false
+    PlaysBatch:
+      allOf:
+        - $ref: '#/components/schemas/BatchBase'
+        - type: object
+          properties:
+            stream: { const: plays }
+            records:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/PlaysRecord'
+      unevaluatedProperties: false
+    RecordBase:
+      type: object
+      required: [record_id, occurred_at, kind, app_session_id, app]
+      properties:
+        record_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        kind: { type: string }
+        app_session_id: { type: string, format: uuid }
+        app:
+          $ref: '#/components/schemas/App'
+    CommonRecord:
+      allOf:
+        - $ref: '#/components/schemas/RecordBase'
+        - type: object
+          properties:
+            kind: { type: string, enum: [app_started, app_backgrounded, app_foregrounded, app_closed, page_viewed, mode_changed] }
+            page: { type: string, enum: [home, games, game, settings, statistics, onboarding] }
+            mode: { type: string, enum: [self, assisted] }
+      unevaluatedProperties: false
+    TechnicalRecord:
+      allOf:
+        - $ref: '#/components/schemas/RecordBase'
+        - type: object
+          required: [component]
+          properties:
+            kind: { type: string, enum: [state_changed, error, queue_dropped] }
+            component: { type: string, enum: [main, renderer, tobii, updater, telemetry] }
+            state: { type: string, enum: [starting, ready, idle, connecting, connected, tracking, checking, downloading, installing, unavailable, error] }
+            error_fingerprint: { type: string, pattern: '^(?:[a-f0-9]{16,96}|sha256:[a-f0-9]{64})$' }
+            dropped_count: { type: integer, minimum: 1, maximum: 1000000 }
+            drop_reason: { type: string, enum: [capacity, expired, invalid, shutdown] }
+      unevaluatedProperties: false
+    PlaysRecord:
+      allOf:
+        - $ref: '#/components/schemas/RecordBase'
+        - type: object
+          required: [game_session_id, game_id, game_category, input_method]
+          properties:
+            kind: { type: string, enum: [session_started, session_finished, interaction] }
+            game_session_id: { type: string, format: uuid }
+            game_id:
+              type: string
+              description: Must exist in the linka-plays compile-time game registry.
+            game_category: { type: string, enum: [gaze-basics, visual-search, sequencing, language-aac, numeracy, strategy, continuous-control] }
+            input_method: { type: string, enum: [mouse, touch, gaze, keyboard] }
+            level_index: { type: integer, minimum: 0, maximum: 4294967295 }
+            outcome: { type: string, enum: [completed, interrupted, cancelled, error, success, mistake, hint] }
+            duration_ms: { type: integer, minimum: 0, maximum: 604800000 }
+            success_count: { type: integer, minimum: 0, maximum: 4294967295 }
+            mistake_count: { type: integer, minimum: 0, maximum: 4294967295 }
+            hint_count: { type: integer, minimum: 0, maximum: 4294967295 }
+            valid_gaze_ratio: { type: number, minimum: 0, maximum: 1 }
+      unevaluatedProperties: false
+    PrivacyRequest:
+      type: object
+      additionalProperties: false
+      required: [schema_version, request_id, scope, action, requested_at]
+      properties:
+        schema_version: { const: 2 }
+        request_id: { type: string, format: uuid }
+        scope:
+          $ref: '#/components/schemas/Scope'
+        action: { type: string, enum: [opt_out, delete] }
+        requested_at: { type: string, format: date-time }

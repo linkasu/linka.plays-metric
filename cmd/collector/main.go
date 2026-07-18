@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -19,9 +20,15 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	installationSecret, err := app.Secret("INSTALLATION_HMAC_SECRET")
-	if err != nil {
-		return err
+	installationSecret := []byte(os.Getenv("INSTALLATION_HMAC_ACTIVE_SECRET"))
+	if len(installationSecret) == 0 {
+		var err error
+		installationSecret, err = app.Secret("INSTALLATION_HMAC_SECRET")
+		if err != nil {
+			return err
+		}
+	} else if len(installationSecret) < 32 {
+		return fmt.Errorf("INSTALLATION_HMAC_ACTIVE_SECRET must contain at least 32 bytes")
 	}
 	writerSecret, err := app.Secret("WRITER_HMAC_SECRET")
 	if err != nil {
@@ -31,11 +38,96 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	tokens, err := auth.NewInstallationTokens(installationSecret)
+	installationMaxAge := 30 * 24 * time.Hour
+	if value := os.Getenv("INSTALLATION_TOKEN_MAX_AGE"); value != "" {
+		installationMaxAge, err = time.ParseDuration(value)
+		if err != nil {
+			return err
+		}
+	}
+	installationKey, previousInstallationKey, err := app.HMACKeyring("INSTALLATION_HMAC", installationSecret)
 	if err != nil {
 		return err
 	}
-	writerClient, err := collector.NewHTTPWriter(writerURL, writerSecret, 10*time.Second)
+	var previousInstallationSecret []byte
+	if previousInstallationKey != nil {
+		previousInstallationSecret = previousInstallationKey.Secret
+	}
+	tokens, err := auth.NewInstallationTokensWithKeyring(installationKey.Secret, previousInstallationSecret, installationMaxAge)
+	if err != nil {
+		return err
+	}
+	serviceKey, _, err := app.HMACKeyring("SERVICE_HMAC", writerSecret)
+	if err != nil {
+		return err
+	}
+	deploymentEnvironment := os.Getenv("DEPLOYMENT_ENVIRONMENT")
+	if deploymentEnvironment == "" {
+		deploymentEnvironment = "production"
+	}
+	if deploymentEnvironment != "production" && deploymentEnvironment != "staging" {
+		return fmt.Errorf("DEPLOYMENT_ENVIRONMENT must be production or staging")
+	}
+	legacyEnabled := false
+	switch os.Getenv("ALLOW_LEGACY_PRODUCT_TOKENS") {
+	case "", "false":
+	case "true":
+		legacyEnabled = true
+	default:
+		return fmt.Errorf("ALLOW_LEGACY_PRODUCT_TOKENS must be true or false")
+	}
+	if legacyEnabled && deploymentEnvironment != "staging" {
+		return fmt.Errorf("ALLOW_LEGACY_PRODUCT_TOKENS is permitted only in staging")
+	}
+	var productTokens *auth.ProductTokens
+	if legacyEnabled {
+		productKey, previousProductKey, err := app.HMACKeyring("PRODUCT_TOKEN_HMAC", installationSecret)
+		if err != nil {
+			return err
+		}
+		productTokenTTL := 24 * time.Hour
+		if value := os.Getenv("PRODUCT_TOKEN_TTL"); value != "" {
+			productTokenTTL, err = time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+		}
+		subjectSecret := installationSecret
+		if value := os.Getenv("SUBJECT_KEY_HMAC_SECRET"); value != "" {
+			subjectSecret = []byte(value)
+		}
+		productTokens, err = auth.NewProductTokensWithSubjectSecret(productKey, previousProductKey, subjectSecret, productTokenTTL)
+		if err != nil {
+			return err
+		}
+	}
+	var identityVerifier *auth.IdentityJWTVerifier
+	if !legacyEnabled || os.Getenv("IDENTITY_JWKS_URL") != "" {
+		jwksURL, err := app.Env("IDENTITY_JWKS_URL")
+		if err != nil {
+			return err
+		}
+		issuer, err := app.Env("IDENTITY_TOKEN_ISSUER")
+		if err != nil {
+			return err
+		}
+		audience, err := app.Env("IDENTITY_TELEMETRY_AUDIENCE")
+		if err != nil {
+			return err
+		}
+		maxLifetime := 15 * time.Minute
+		if value := os.Getenv("IDENTITY_TOKEN_MAX_LIFETIME"); value != "" {
+			maxLifetime, err = time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+		}
+		identityVerifier, err = auth.NewIdentityJWTVerifier(jwksURL, issuer, audience, maxLifetime, deploymentEnvironment == "staging")
+		if err != nil {
+			return err
+		}
+	}
+	writerClient, err := collector.NewHTTPWriterWithServiceKey(writerURL, writerSecret, serviceKey, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -43,5 +135,7 @@ func run(logger *slog.Logger) error {
 	if address == "" {
 		address = ":8080"
 	}
-	return app.Serve(address, collector.NewServer(writerClient, tokens, logger), logger)
+	return app.Serve(address, collector.NewServerWithIdentityV2(
+		writerClient, writerClient, tokens, identityVerifier, productTokens, legacyEnabled, logger,
+	), logger)
 }

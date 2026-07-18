@@ -1,10 +1,12 @@
 # LINKa Plays Metric
 
-Сервис обезличенной технической, продуктовой и игровой телеметрии LINKa Plays. Репозиторий содержит три Go-бинаря:
+Сервис обезличенной технической, продуктовой и игровой телеметрии LINKa Plays. Репозиторий содержит пять Go-бинарей:
 
 - `collector` выдаёт анонимный installation token, проверяет контракт v1 и синхронно пересылает batch в writer;
 - `writer` проверяет отдельную HMAC-подпись collector и записывает данные в ClickHouse;
 - `disk-alert` отправляет одно SMTP-уведомление при достижении порога диска и не повторяет его до восстановления.
+- `migrate` применяет embedded ClickHouse migrations через checksum ledger;
+- `privacy-worker` выполняет lease/retry-based удаление V1/V2 telemetry с durable per-table progress.
 
 Collector не считает installation token доказательством подлинности приложения. Токен только связывает случайный UUID установки с HMAC сервера. IP-адреса и тела запросов не журналируются.
 
@@ -32,8 +34,14 @@ Collector:
 INSTALLATION_HMAC_SECRET='at-least-32-random-bytes-change-me' \
 WRITER_HMAC_SECRET='another-at-least-32-byte-secret' \
 WRITER_URL='http://127.0.0.1:8081' \
+DEPLOYMENT_ENVIRONMENT=staging \
+ALLOW_LEGACY_PRODUCT_TOKENS=true \
+PRODUCT_TOKEN_HMAC_ACTIVE_SECRET='local-staging-token-secret-at-least-32-bytes' \
+SUBJECT_KEY_HMAC_SECRET='local-stable-subject-secret-at-least-32-bytes' \
 go run ./cmd/collector
 ```
+
+Production instead requires `IDENTITY_JWKS_URL` (HTTPS), exact `IDENTITY_TOKEN_ISSUER` and `IDENTITY_TELEMETRY_AUDIENCE`; legacy token minting cannot be enabled in production.
 
 ## Контейнеры
 
@@ -63,14 +71,18 @@ Environment-файл задаёт `DISK_PATH`, `DISK_THRESHOLD_PERCENT=80`, `DIS
 ## Документация
 
 - [API v1](docs/api.md)
+- [Telemetry V2](docs/telemetry-v2.md)
+- [Staging и upgrade](docs/staging.md)
 - [Политика приватности](docs/privacy.md)
 - [Terraform и bootstrap YC](infra/terraform/README.md)
 
 ## CI/CD
 
-`CI` запускает gofmt, тесты, vet и проверочную сборку образов. После успешного `main` workflow `Publish Images` публикует collector, writer и disk-alert в GHCR. Deploy workflows скачивают уже собранные образы и не собирают их на VPS или в Yandex Cloud.
+`CI` запускает gofmt, unit tests, ClickHouse 25.3 migration/integration tests, vet и проверочную сборку образов. После успешного `main` workflow `Publish Images` публикует collector, writer и disk-alert в GHCR. Deploy workflows скачивают уже собранные образы и не собирают их на VPS или в Yandex Cloud.
 
 Необходимые GitHub secrets:
 
 - VPS: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_KNOWN_HOSTS`, `VPS_DEPLOY_PATH`, `CLICKHOUSE_DATALENS_PASSWORD`;
 - YC: `YC_SA_KEY_JSON`, `YC_CLOUD_ID`, dedicated `YC_FOLDER_ID`, `YC_REGISTRY_ID`, `YC_RUNTIME_SA_ID`, `YC_LOCKBOX_SECRET_ID`, `YC_LOCKBOX_SECRET_VERSION_ID`, `WRITER_URL`.
+
+Production YC environment variables: `IDENTITY_JWKS_URL`, `IDENTITY_TOKEN_ISSUER`, `IDENTITY_TELEMETRY_AUDIENCE`.

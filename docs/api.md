@@ -1,5 +1,7 @@
 # API v1
 
+V1 заморожен для совместимости. Контракт V2 и OpenAPI находятся в [Telemetry V2](telemetry-v2.md), [public OpenAPI](openapi-v2.yaml) и [internal OpenAPI](openapi-internal-v2.yaml).
+
 Все JSON endpoints требуют `Content-Type: application/json`. Неизвестные JSON-поля и данные после корневого объекта запрещены. Максимальный размер batch — 512 KiB, максимум 500 записей суммарно для `events` и `session_summaries`.
 
 ## Collector
@@ -24,6 +26,9 @@
   "token_version": "v1"
 }
 ```
+
+Installation tokens have a bounded lifetime (`INSTALLATION_TOKEN_MAX_AGE`, 30 days by default).
+`POST /v1/installations/renew` accepts `{}` with the current bearer token and returns a fresh token for the same `installation_id`.
 
 ### `POST /v1/events`
 
@@ -60,6 +65,21 @@
 ```
 
 Время задаётся в RFC3339 с точностью не выше миллисекунд. UUID обязательны. `game_session_id` обязателен для игровых событий.
+
+### `POST /v1/privacy/requests`
+
+Requires the installation bearer token and `Idempotency-Key` equal to `request_id`. The installation is taken only from the verified token and cannot be supplied in the body:
+
+```json
+{
+  "schema_version": 1,
+  "request_id": "50000000-0000-4000-8000-000000000005",
+  "action": "delete",
+  "requested_at": "2026-07-18T12:00:00Z"
+}
+```
+
+The `202` response means suppression is active and deletion is queued. Repeating the same request polls its durable status; `completed` means both V1 telemetry tables were deleted. New V1 telemetry for a suppressed installation is rejected.
 
 ## События и properties
 

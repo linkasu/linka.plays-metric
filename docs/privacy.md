@@ -1,8 +1,10 @@
 # Политика приватности
 
+Версия: `2026-07-18-v2`. Дата вступления в силу: 18 июля 2026 года.
+
 ## Назначение
 
-LINKa Plays Metric собирает только предусмотренные контрактом обезличенные технические, продуктовые и игровые события, необходимые для оценки работы приложения и игровых сценариев. Контракт закрытый: неизвестные события, поля и свойства отклоняются до записи.
+LINKa Plays Metric собирает только предусмотренные закрытыми контрактами v1 и v2 обезличенные технические, продуктовые и игровые события, необходимые для оценки работы приложения и игровых сценариев. Неизвестные события, поля, дублированные JSON-ключи и значения вне allowlist отклоняются до записи.
 
 ## Что разрешено
 
@@ -21,12 +23,18 @@ LINKa Plays Metric собирает только предусмотренные 
 
 ## Идентификатор установки
 
-Collector генерирует UUID v4 криптографическим генератором и выдаёт stateless token `v1`, содержащий UUID, время выдачи и HMAC-SHA256. Сравнение подписи выполняется в постоянном времени. Токен не содержит персональных данных, не подтверждает происхождение приложения и не является механизмом аттестации.
+Collector генерирует UUID v4 криптографическим генератором и выдаёт bounded-lifetime stateless token `v1`, содержащий UUID, время выдачи и HMAC-SHA256. Token можно обновить без смены UUID. Production v2 принимает короткоживущие Ed25519 JWT от LINKa Identity через rotating JWKS; `subject_key`, `person_key` и `org_key` являются product/audience-separated 64-символьными pairwise HMAC keys. Legacy `/v2/tokens` доступен только при явном staging flag. Сравнение HMAC выполняется в постоянном времени.
 
 ## Передача и хранение
 
-Collector проверяет bearer token и весь batch, затем подписывает точное тело запроса отдельным HMAC-секретом writer. Writer проверяет timestamp, SHA-256 тела и подпись до разбора и вставки. В рабочей конфигурации внешние соединения завершаются TLS.
+Collector проверяет bearer token и весь batch, затем подписывает точное тело запроса отдельным HMAC-секретом writer. V2 service HMAC связывает версию, HTTP method, path, caller, key id, request/idempotency id, timestamp и SHA-256 точного тела; writer принимает active и один previous key при ротации. Writer проверяет подпись до разбора и вставки. В рабочей конфигурации внешние соединения завершаются TLS.
 
-В таблицах ClickHouse нет TTL. Срок хранения и удаление задаются оператором отдельно. `ReplacingMergeTree` и стабильные UUID обеспечивают идемпотентное чтение через DataLens views с `FINAL`.
+В таблицах ClickHouse нет активного TTL. V2 содержит nullable `expires_at`; он заполняется только после явной настройки утверждённых юридической функцией сроков. Настройка срока сама по себе не включает SQL `TTL`: удаление по сроку требует отдельного согласованного operational change. `ReplacingMergeTree`, stable record IDs, batch ledger и DataLens views с `FINAL` обеспечивают безопасный replay/read path.
+
+## Opt-out и удаление
+
+`POST /v2/privacy/requests` принимает `opt_out` или `delete` только в scope предъявленного Identity JWT. Ответ `202` означает, что active suppression и request надёжно записаны, но не означает завершение удаления. Worker использует lease, bounded retry и отдельный durable progress для каждой ClickHouse table; `completed` появляется только после всех synchronous mutations. Повторный idempotent POST возвращает текущий status и служит receipt polling для Identity.
+
+`POST /v1/privacy/requests` удаляет `events` и `session_summaries` только для installation из предъявленного V1 token и блокирует последующую загрузку этой installation. Удаление v1 по person/org невозможно без внешнего сопоставления: v1 хранит только случайный installation UUID.
 
 Технический контакт: ivan@aacidov.ru.

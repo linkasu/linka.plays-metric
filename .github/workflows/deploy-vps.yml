@@ -6,6 +6,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      ref:
+        description: Exact commit SHA or immutable Git ref
+        required: true
       image_tag:
         description: Published writer tag, for example sha-<commit>
         required: true
@@ -26,11 +29,18 @@ jobs:
     environment: production-vps
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      DEPLOY_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
       IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_REF }}
       - name: Validate image tag
-        run: '[[ "$IMAGE_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]'
+        run: |
+          [[ "$IMAGE_TAG" =~ ^sha-[0-9a-f]{40}$ ]]
+          if [[ "$DEPLOY_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            test "$IMAGE_TAG" = "sha-$DEPLOY_REF"
+          fi
       - name: Configure SSH
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -64,8 +74,12 @@ jobs:
             docker login ghcr.io --username '$GHCR_USER' --password-stdin; \
             cd '$VPS_DEPLOY_PATH'; \
             sed -i.bak 's/^IMAGE_TAG=.*/IMAGE_TAG=$IMAGE_TAG/' .env; \
-            IMAGE_TAG='$IMAGE_TAG' docker compose --profile ops pull writer disk-alert; \
-            IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build clickhouse writer caddy"
+            IMAGE_TAG='$IMAGE_TAG' docker compose --profile ops --profile migration --profile privacy pull writer disk-alert migrate privacy-worker; \
+            IMAGE_TAG='$IMAGE_TAG' docker compose up -d --no-build clickhouse; \
+            IMAGE_TAG='$IMAGE_TAG' docker compose --profile migration run --rm migrate; \
+            sh deploy/clickhouse/preflight.sh; \
+            sh deploy/clickhouse/configure-v2-users.sh; \
+            IMAGE_TAG='$IMAGE_TAG' docker compose --profile privacy up -d --no-build writer privacy-worker caddy"
 
       - name: Configure DataLens read-only user
         env:

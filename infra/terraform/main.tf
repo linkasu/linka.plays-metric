@@ -91,16 +91,39 @@ resource "yandex_serverless_container" "collector" {
   image {
     url = var.collector_image_url
     environment = {
-      LISTEN_ADDR = ":8080"
-      WRITER_URL  = var.writer_url
+      LISTEN_ADDR                        = ":8080"
+      WRITER_URL                         = var.writer_url
+      SERVICE_HMAC_ACTIVE_KEY_ID         = var.service_hmac_active_key_id
+      DEPLOYMENT_ENVIRONMENT             = "production"
+      INSTALLATION_TOKEN_MAX_AGE         = "720h"
+      INSTALLATION_HMAC_ACTIVE_KEY_ID     = var.installation_hmac_active_key_id
+      INSTALLATION_HMAC_PREVIOUS_KEY_ID   = var.installation_hmac_previous_key_id
+      IDENTITY_JWKS_URL                  = var.identity_jwks_url
+      IDENTITY_TOKEN_ISSUER              = var.identity_token_issuer
+      IDENTITY_TELEMETRY_AUDIENCE        = var.identity_telemetry_audience
+      IDENTITY_TOKEN_MAX_LIFETIME        = "15m"
     }
   }
 
   secrets {
     id                   = yandex_lockbox_secret.runtime.id
     version_id           = var.lockbox_secret_version_id
-    key                  = "installation_hmac_secret"
-    environment_variable = "INSTALLATION_HMAC_SECRET"
+    key                  = "installation_hmac_active_secret"
+    environment_variable = "INSTALLATION_HMAC_ACTIVE_SECRET"
+  }
+
+  secrets {
+    id                   = yandex_lockbox_secret.runtime.id
+    version_id           = var.lockbox_secret_version_id
+    key                  = "installation_hmac_previous_secret"
+    environment_variable = "INSTALLATION_HMAC_PREVIOUS_SECRET"
+  }
+
+  secrets {
+    id                   = yandex_lockbox_secret.runtime.id
+    version_id           = var.lockbox_secret_version_id
+    key                  = "service_hmac_active_secret"
+    environment_variable = "SERVICE_HMAC_ACTIVE_SECRET"
   }
 
   secrets {

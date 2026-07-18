@@ -14,6 +14,21 @@ env:
 jobs:
   go:
     runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3.6.56-alpine
+        env:
+          CLICKHOUSE_DB: linka_metric
+          CLICKHOUSE_USER: integration
+          CLICKHOUSE_PASSWORD: integration-ci-only
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "clickhouse-client --user integration --password integration-ci-only --query 'SELECT 1'"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -28,6 +43,19 @@ jobs:
             exit 1
           fi
       - run: go test ./...
+      - name: Apply ClickHouse migrations
+        env:
+          CLICKHOUSE_ADDRS: 127.0.0.1:9000
+          CLICKHOUSE_ADMIN_USER: integration
+          CLICKHOUSE_ADMIN_PASSWORD: integration-ci-only
+          CLICKHOUSE_DATABASE: linka_metric
+        run: go run ./cmd/migrate
+      - name: Run ClickHouse integration tests
+        env:
+          CLICKHOUSE_INTEGRATION_ADDR: 127.0.0.1:9000
+          CLICKHOUSE_INTEGRATION_USER: integration
+          CLICKHOUSE_INTEGRATION_PASSWORD: integration-ci-only
+        run: go test ./internal/clickhouse -run Integration -count=1
       - run: go vet ./...
 
   docker:
@@ -35,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        binary: [collector, writer, disk-alert]
+        binary: [collector, writer, disk-alert, migrate, privacy-worker]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
