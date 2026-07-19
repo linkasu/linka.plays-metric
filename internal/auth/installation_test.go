@@ -38,10 +38,13 @@ func TestInstallationTokenRejectsTampering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tampered := token[:len(token)-1] + "A"
-	if tampered == token {
-		tampered = token[:len(token)-1] + "B"
+	parts := strings.Split(token, ".")
+	if parts[2][len(parts[2])-1] == '0' {
+		parts[2] = parts[2][:len(parts[2])-1] + "1"
+	} else {
+		parts[2] = parts[2][:len(parts[2])-1] + "0"
 	}
+	tampered := strings.Join(parts, ".")
 	if _, err := manager.Verify(tampered); err == nil {
 		t.Fatal("tampered token was accepted")
 	}
