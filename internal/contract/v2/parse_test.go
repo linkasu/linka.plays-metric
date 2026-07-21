@@ -43,6 +43,51 @@ func TestParseBatchAcceptsRegisteredOutcomeAndRejectsUnsafeValues(t *testing.T) 
 	}
 }
 
+func TestParseBatchEnforcesOutcomeFieldRules(t *testing.T) {
+	tests := []struct {
+		product   string
+		kind      string
+		fields    []string
+		required  []string
+		forbidden string
+	}{
+		{"linka-looks", "utterance_completed", []string{`"result":"completed"`, `"mode":"standard"`}, []string{`"result":"completed"`, `"mode":"standard"`}, `"source":"input"`},
+		{"linka-looks", "exercise_completed", []string{`"result":"completed"`, `"source":"quiz"`, `"count_bucket":"one"`}, []string{`"result":"completed"`, `"source":"quiz"`, `"count_bucket":"one"`}, `"mode":"standard"`},
+		{"linka-looks", "set_saved", []string{`"result":"completed"`, `"source":"created"`, `"count_bucket":"one"`}, []string{`"result":"completed"`, `"source":"created"`, `"count_bucket":"one"`}, `"duration_bucket":"under_5s"`},
+		{"linka-looks", "transfer_completed", []string{`"result":"completed"`, `"source":"import"`}, []string{`"result":"completed"`, `"source":"import"`}, `"count_bucket":"one"`},
+		{"linka-looks", "gaze_calibration_completed", []string{`"result":"completed"`}, []string{`"result":"completed"`}, `"source":"input"`},
+		{"linka-pictures", "utterance_completed", []string{`"result":"completed"`, `"mode":"standard"`}, []string{`"result":"completed"`, `"mode":"standard"`}, `"source":"input"`},
+		{"linka-pictures", "exercise_completed", []string{`"result":"completed"`, `"source":"quiz"`, `"count_bucket":"one"`}, []string{`"result":"completed"`, `"source":"quiz"`, `"count_bucket":"one"`}, `"mode":"standard"`},
+		{"linka-pictures", "set_saved", []string{`"result":"completed"`, `"source":"created"`, `"count_bucket":"one"`}, []string{`"result":"completed"`, `"source":"created"`, `"count_bucket":"one"`}, `"duration_bucket":"under_5s"`},
+		{"linka-pictures", "transfer_completed", []string{`"result":"completed"`, `"source":"import"`}, []string{`"result":"completed"`, `"source":"import"`}, `"count_bucket":"one"`},
+		{"linka-type", "phrase_composed", []string{`"source":"input"`, `"count_bucket":"one"`}, []string{`"source":"input"`, `"count_bucket":"one"`}, `"result":"completed"`},
+		{"linka-type", "speech_completed", []string{`"result":"completed"`, `"source":"input"`, `"mode":"cloud"`, `"count_bucket":"one"`, `"duration_bucket":"under_5s"`}, []string{`"result":"completed"`, `"source":"input"`, `"mode":"cloud"`, `"count_bucket":"one"`, `"duration_bucket":"under_5s"`}, `"unexpected":"value"`},
+		{"linka-type", "bank_action_completed", []string{`"result":"completed"`, `"source":"phrase_inserted"`}, []string{`"result":"completed"`, `"source":"phrase_inserted"`}, `"count_bucket":"one"`},
+		{"linka-type", "dialog_action_completed", []string{`"result":"completed"`, `"source":"message_sent"`}, []string{`"result":"completed"`, `"source":"message_sent"`}, `"count_bucket":"one"`},
+		{"linka-type", "sync_completed", []string{`"result":"completed"`, `"count_bucket":"one"`}, []string{`"result":"completed"`, `"count_bucket":"one"`}, `"source":"input"`},
+		{"linka-tts", "request_completed", []string{`"result":"completed"`, `"source":"yandex"`, `"count_bucket":"one"`, `"duration_bucket":"under_5s"`}, []string{`"result":"completed"`, `"source":"yandex"`, `"count_bucket":"one"`, `"duration_bucket":"under_5s"`}, `"mode":"cloud"`},
+		{"linka-tts", "cache_operation", []string{`"result":"hit"`}, []string{`"result":"hit"`}, `"source":"yandex"`},
+	}
+	for _, test := range tests {
+		t.Run(test.product+"/"+test.kind, func(t *testing.T) {
+			body := outcomeBatch(test.product, test.kind, test.fields...)
+			if _, err := ParseBatch([]byte(body), testNow); err != nil {
+				t.Fatalf("valid outcome: %v", err)
+			}
+			for _, field := range test.required {
+				withoutField := strings.Replace(body, ","+field, "", 1)
+				if _, err := ParseBatch([]byte(withoutField), testNow); err == nil {
+					t.Fatalf("accepted outcome without required %s", field)
+				}
+			}
+			withForbiddenField := strings.Replace(body, "\n   }]", ","+test.forbidden+"\n   }]", 1)
+			if _, err := ParseBatch([]byte(withForbiddenField), testNow); err == nil {
+				t.Fatalf("accepted outcome with forbidden %s", test.forbidden)
+			}
+		})
+	}
+}
+
 func TestParseBatchAcceptsRegisteredProductKindsAndPlatforms(t *testing.T) {
 	tests := []struct {
 		product  string
@@ -303,4 +348,21 @@ func validOutcomeBatch(productID, kind, platform string) string {
     "duration_bucket":"under_5s"
   }]
 }`, productID, testOpaqueKey, kind, platform)
+}
+
+func outcomeBatch(productID, kind string, fields ...string) string {
+	return fmt.Sprintf(`{
+  "schema_version":2,
+  "batch_id":"10000000-0000-4000-8000-000000000001",
+  "scope":{"product":%q,"subject_key":%q},
+  "stream":"outcome",
+  "sent_at":"2026-07-18T12:00:00.000Z",
+  "records":[{
+    "record_id":"20000000-0000-4000-8000-000000000002",
+    "occurred_at":"2026-07-18T11:59:00.000Z",
+    "kind":%q,
+    "app_session_id":"30000000-0000-4000-8000-000000000003",
+    "app":{"version":"1.2.3","build":"42","platform":"web","os_version":"1","locale":"ru-RU"}%s
+   }]
+}`, productID, testOpaqueKey, kind, ","+strings.Join(fields, ","))
 }

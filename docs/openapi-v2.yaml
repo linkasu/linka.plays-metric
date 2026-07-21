@@ -243,7 +243,7 @@ components:
         batch_id: { type: string, format: uuid }
         scope:
           $ref: '#/components/schemas/Scope'
-        stream: { type: string, enum: [common, technical, plays, product] }
+        stream: { type: string, enum: [common, technical, plays, product, outcome] }
         sent_at: { type: string, format: date-time }
     Batch:
       oneOf:
@@ -251,6 +251,7 @@ components:
         - $ref: '#/components/schemas/TechnicalBatch'
         - $ref: '#/components/schemas/PlaysBatch'
         - $ref: '#/components/schemas/ProductBatch'
+        - $ref: '#/components/schemas/OutcomeBatch'
       discriminator:
         propertyName: stream
         mapping:
@@ -258,6 +259,7 @@ components:
           technical: '#/components/schemas/TechnicalBatch'
           plays: '#/components/schemas/PlaysBatch'
           product: '#/components/schemas/ProductBatch'
+          outcome: '#/components/schemas/OutcomeBatch'
     CommonBatch:
       allOf:
         - $ref: '#/components/schemas/BatchBase'
@@ -309,6 +311,19 @@ components:
               maxItems: 500
               items:
                 $ref: '#/components/schemas/ProductRecord'
+      unevaluatedProperties: false
+    OutcomeBatch:
+      allOf:
+        - $ref: '#/components/schemas/BatchBase'
+        - type: object
+          properties:
+            stream: { const: outcome }
+            records:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/OutcomeRecord'
       unevaluatedProperties: false
     RecordBase:
       type: object
@@ -378,6 +393,38 @@ components:
               type: string
               pattern: '^[A-Za-z0-9][A-Za-z0-9._:+-]{0,95}$'
               description: Must exist in the compile-time kind registry for scope.product. No arbitrary payload or attributes are accepted.
+      unevaluatedProperties: false
+    OutcomeRecord:
+      description: >-
+        A completed safe product action. The product-scoped compile-time registry defines
+        the exact allowed and required fields for kind; fields not registered for that
+        product/kind are forbidden. failure_code is optional when registered.
+      allOf:
+        - $ref: '#/components/schemas/RecordBase'
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum: [utterance_completed, exercise_completed, set_saved, transfer_completed, gaze_calibration_completed, phrase_composed, speech_completed, bank_action_completed, dialog_action_completed, sync_completed, request_completed, cache_operation]
+              description: Must exist in the outcome registry for scope.product.
+            result:
+              type: string
+              enum: [completed, failed, cancelled, incomplete, hit, miss, evicted]
+            source:
+              type: string
+              enum: [input, quick, bank, dialog, quiz, match, created, edited, import, export, phrase_inserted, phrase_spoken, reader_opened, message_sent, suggestion_accepted, suggestion_dismissed, yandex, sber, local]
+            mode:
+              type: string
+              enum: [standard, direct, without-space, local, cloud]
+            count_bucket:
+              type: string
+              enum: [one, two_to_five, six_to_twenty, more_than_twenty]
+            duration_bucket:
+              type: string
+              enum: [under_5s, 5s_to_30s, 31s_to_2m, over_2m]
+            failure_code:
+              type: string
+              enum: [engine_unavailable, request_failed, timeout, cancelled, state_invalid, media_unavailable, interrupted, validation_failed, storage_failed, permission_denied, format_invalid, media_missing, device_unavailable, calibration_failed, network_unavailable, conflict, server_error, provider_unavailable, quota_exceeded]
       unevaluatedProperties: false
     PrivacyRequest:
       type: object

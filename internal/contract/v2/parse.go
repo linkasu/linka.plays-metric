@@ -361,32 +361,38 @@ func validateOutcomeRecord(record OutcomeRecord, sentAt time.Time, spec product.
 	if !ok {
 		return ValidatedOutcomeRecord{}, errors.New("outcome kind is not registered for product")
 	}
-	if err := validateOptionalEnum("result", record.Result, rule.Results); err != nil {
+	if err := validateOutcomeEnum("result", record.Result, rule.Results, rule.Requires(product.OutcomeResult)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
-	if err := validateOptionalEnum("source", record.Source, rule.Sources); err != nil {
+	if err := validateOutcomeEnum("source", record.Source, rule.Sources, rule.Requires(product.OutcomeSource)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
-	if err := validateOptionalEnum("mode", record.Mode, rule.Modes); err != nil {
+	if err := validateOutcomeEnum("mode", record.Mode, rule.Modes, rule.Requires(product.OutcomeMode)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
-	if err := validateOptionalEnum("count_bucket", record.CountBucket, rule.CountBuckets); err != nil {
+	if err := validateOutcomeEnum("count_bucket", record.CountBucket, rule.CountBuckets, rule.Requires(product.OutcomeCountBucket)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
-	if err := validateOptionalEnum("duration_bucket", record.DurationBucket, rule.DurationBuckets); err != nil {
+	if err := validateOutcomeEnum("duration_bucket", record.DurationBucket, rule.DurationBuckets, rule.Requires(product.OutcomeDurationBucket)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
-	if err := validateOptionalEnum("failure_code", record.FailureCode, rule.FailureCodes); err != nil {
+	if err := validateOutcomeEnum("failure_code", record.FailureCode, rule.FailureCodes, rule.Requires(product.OutcomeFailureCode)); err != nil {
 		return ValidatedOutcomeRecord{}, err
 	}
 	return ValidatedOutcomeRecord{OutcomeRecord: record, OccurredAtTime: occurredAt}, nil
 }
 
-func validateOptionalEnum(name string, value *string, allowed []string) error {
+func validateOutcomeEnum(name string, value *string, allowed []string, required bool) error {
 	if value == nil {
+		if required {
+			return fmt.Errorf("%s is required", name)
+		}
 		return nil
 	}
-	if len(allowed) == 0 || !oneOf(*value, allowed...) {
+	if len(allowed) == 0 {
+		return fmt.Errorf("%s is forbidden for outcome kind", name)
+	}
+	if !oneOf(*value, allowed...) {
 		return fmt.Errorf("%s contains an unregistered value", name)
 	}
 	return nil

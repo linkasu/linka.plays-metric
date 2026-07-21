@@ -23,6 +23,7 @@ const (
 )
 
 type OutcomeRule struct {
+	Required        []OutcomeField
 	Results         []string
 	Sources         []string
 	Modes           []string
@@ -30,6 +31,17 @@ type OutcomeRule struct {
 	DurationBuckets []string
 	FailureCodes    []string
 }
+
+type OutcomeField string
+
+const (
+	OutcomeResult         OutcomeField = "result"
+	OutcomeSource         OutcomeField = "source"
+	OutcomeMode           OutcomeField = "mode"
+	OutcomeCountBucket    OutcomeField = "count_bucket"
+	OutcomeDurationBucket OutcomeField = "duration_bucket"
+	OutcomeFailureCode    OutcomeField = "failure_code"
+)
 
 type Spec struct {
 	ID           ID
@@ -85,11 +97,11 @@ var registry = map[ID]Spec{
 			"updateAvailable", "updateDownloaded", "updateError", "updateInstallConfirmed", "deploySmoke",
 		),
 		outcomeRules: outcomeRules(
-			"utterance_completed", OutcomeRule{Results: []string{"completed", "failed", "cancelled"}, Modes: []string{"standard", "direct", "without-space"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
-			"exercise_completed", OutcomeRule{Results: []string{"completed", "incomplete", "failed"}, Sources: []string{"quiz", "match"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: exerciseFailureCodes},
-			"set_saved", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"created", "edited"}, CountBuckets: countBuckets, FailureCodes: setFailureCodes},
-			"transfer_completed", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"import", "export"}, FailureCodes: transferFailureCodes},
-			"gaze_calibration_completed", OutcomeRule{Results: []string{"completed", "failed", "cancelled"}, FailureCodes: gazeFailureCodes},
+			"utterance_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeMode), Results: []string{"completed", "failed", "cancelled"}, Modes: []string{"standard", "direct", "without-space"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
+			"exercise_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeCountBucket), Results: []string{"completed", "incomplete", "failed"}, Sources: []string{"quiz", "match"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: exerciseFailureCodes},
+			"set_saved", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeCountBucket), Results: []string{"completed", "failed"}, Sources: []string{"created", "edited"}, CountBuckets: countBuckets, FailureCodes: setFailureCodes},
+			"transfer_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource), Results: []string{"completed", "failed"}, Sources: []string{"import", "export"}, FailureCodes: transferFailureCodes},
+			"gaze_calibration_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult), Results: []string{"completed", "failed", "cancelled"}, FailureCodes: gazeFailureCodes},
 		),
 	},
 	LinkaPictures: {
@@ -102,10 +114,10 @@ var registry = map[ID]Spec{
 			"set_save", "parent_code_check", "non_fatal_error",
 		),
 		outcomeRules: outcomeRules(
-			"utterance_completed", OutcomeRule{Results: []string{"completed", "failed", "cancelled"}, Modes: []string{"standard", "direct", "without-space"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
-			"exercise_completed", OutcomeRule{Results: []string{"completed", "incomplete", "failed"}, Sources: []string{"quiz", "match"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: exerciseFailureCodes},
-			"set_saved", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"created", "edited"}, CountBuckets: countBuckets, FailureCodes: setFailureCodes},
-			"transfer_completed", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"import", "export"}, FailureCodes: transferFailureCodes},
+			"utterance_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeMode), Results: []string{"completed", "failed", "cancelled"}, Modes: []string{"standard", "direct", "without-space"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
+			"exercise_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeCountBucket), Results: []string{"completed", "incomplete", "failed"}, Sources: []string{"quiz", "match"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: exerciseFailureCodes},
+			"set_saved", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeCountBucket), Results: []string{"completed", "failed"}, Sources: []string{"created", "edited"}, CountBuckets: countBuckets, FailureCodes: setFailureCodes},
+			"transfer_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource), Results: []string{"completed", "failed"}, Sources: []string{"import", "export"}, FailureCodes: transferFailureCodes},
 		),
 	},
 	LinkaType: {
@@ -119,11 +131,11 @@ var registry = map[ID]Spec{
 			"dialog_chat_select", "dialog_chat_delete", "dialog_message_send", "dialog_record_start", "dialog_record_stop",
 		),
 		outcomeRules: outcomeRules(
-			"phrase_composed", OutcomeRule{Sources: []string{"input", "quick", "bank", "dialog"}, CountBuckets: countBuckets},
-			"speech_completed", OutcomeRule{Results: []string{"completed", "failed", "cancelled"}, Sources: []string{"input", "quick", "bank", "dialog"}, Modes: []string{"local", "cloud"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
-			"bank_action_completed", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"phrase_inserted", "phrase_spoken", "reader_opened"}, FailureCodes: setFailureCodes},
-			"dialog_action_completed", OutcomeRule{Results: []string{"completed", "failed"}, Sources: []string{"message_sent", "suggestion_accepted", "suggestion_dismissed"}, FailureCodes: setFailureCodes},
-			"sync_completed", OutcomeRule{Results: []string{"completed", "failed"}, CountBuckets: countBuckets, FailureCodes: syncFailureCodes},
+			"phrase_composed", OutcomeRule{Required: requiredOutcomeFields(OutcomeSource, OutcomeCountBucket), Sources: []string{"input", "quick", "bank", "dialog"}, CountBuckets: countBuckets},
+			"speech_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeMode, OutcomeCountBucket, OutcomeDurationBucket), Results: []string{"completed", "failed", "cancelled"}, Sources: []string{"input", "quick", "bank", "dialog"}, Modes: []string{"local", "cloud"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: playbackFailureCodes},
+			"bank_action_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource), Results: []string{"completed", "failed"}, Sources: []string{"phrase_inserted", "phrase_spoken", "reader_opened"}, FailureCodes: setFailureCodes},
+			"dialog_action_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource), Results: []string{"completed", "failed"}, Sources: []string{"message_sent", "suggestion_accepted", "suggestion_dismissed"}, FailureCodes: setFailureCodes},
+			"sync_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeCountBucket), Results: []string{"completed", "failed"}, CountBuckets: countBuckets, FailureCodes: syncFailureCodes},
 		),
 	},
 	LinkaPaperboard: {
@@ -141,8 +153,8 @@ var registry = map[ID]Spec{
 		streams:      streamSet(StreamProduct, StreamOutcome),
 		productKinds: stringSet("tts_generated"),
 		outcomeRules: outcomeRules(
-			"request_completed", OutcomeRule{Results: []string{"completed", "failed", "cancelled"}, Sources: []string{"yandex", "sber", "local"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: ttsFailureCodes},
-			"cache_operation", OutcomeRule{Results: []string{"hit", "miss", "evicted"}},
+			"request_completed", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult, OutcomeSource, OutcomeCountBucket, OutcomeDurationBucket), Results: []string{"completed", "failed", "cancelled"}, Sources: []string{"yandex", "sber", "local"}, CountBuckets: countBuckets, DurationBuckets: durationBuckets, FailureCodes: ttsFailureCodes},
+			"cache_operation", OutcomeRule{Required: requiredOutcomeFields(OutcomeResult), Results: []string{"hit", "miss", "evicted"}},
 		),
 	},
 }
@@ -184,6 +196,15 @@ func (s Spec) OutcomeRule(kind string) (OutcomeRule, bool) {
 	return rule, ok
 }
 
+func (r OutcomeRule) Requires(field OutcomeField) bool {
+	for _, required := range r.Required {
+		if required == field {
+			return true
+		}
+	}
+	return false
+}
+
 func streamSet(values ...Stream) map[Stream]struct{} {
 	result := make(map[Stream]struct{}, len(values))
 	for _, value := range values {
@@ -198,6 +219,10 @@ func stringSet(values ...string) map[string]struct{} {
 		result[value] = struct{}{}
 	}
 	return result
+}
+
+func requiredOutcomeFields(values ...OutcomeField) []OutcomeField {
+	return values
 }
 
 func outcomeRules(values ...any) map[string]OutcomeRule {
