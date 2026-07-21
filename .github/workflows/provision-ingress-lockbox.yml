@@ -20,6 +20,7 @@ jobs:
       YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
       - name: Validate inputs
         run: |
           test "${#DONATION_SECRET}" -ge 32
@@ -36,12 +37,16 @@ jobs:
       - name: Create sealed ingress keyring
         id: lockbox
         run: |
-          test -z "$("$HOME/yandex-cloud/bin/yc" lockbox secret list --format json | jq -r '.[] | select(.name == "linka-metrics-ingress") | .id')"
-          payload="$(jq -nc --arg donation "$DONATION_SECRET" --arg tts "$TTS_SECRET" '[
-            {key: "donation_ingest_hmac_active_secret", text_value: $donation},
-            {key: "tts_outcome_hmac_active_secret", text_value: $tts}
-          ]')"
-          secret="$("$HOME/yandex-cloud/bin/yc" lockbox secret create --name linka-metrics-ingress --description 'Independent HMAC secrets for LINKa Metrics service ingress' --payload "$payload" --deletion-protection --format json)"
+          existing_id="$("$HOME/yandex-cloud/bin/yc" lockbox secret list --format json | jq -r '.[] | select(.name == "linka-metrics-ingress") | .id')"
+          if [[ -n "$existing_id" ]]; then
+            secret="$("$HOME/yandex-cloud/bin/yc" lockbox secret get --id "$existing_id" --format json)"
+          else
+            payload="$(jq -nc --arg donation "$DONATION_SECRET" --arg tts "$TTS_SECRET" '[
+              {key: "donation_ingest_hmac_active_secret", text_value: $donation},
+              {key: "tts_outcome_hmac_active_secret", text_value: $tts}
+            ]')"
+            secret="$("$HOME/yandex-cloud/bin/yc" lockbox secret create --name linka-metrics-ingress --description 'Independent HMAC secrets for LINKa Metrics service ingress' --payload "$payload" --deletion-protection --format json)"
+          fi
           printf 'id=%s\nversion=%s\n' "$(jq -r .id <<<"$secret")" "$(jq -r .current_version.id <<<"$secret")" >> "$GITHUB_OUTPUT"
       - name: Publish non-secret deployment references
         run: |
